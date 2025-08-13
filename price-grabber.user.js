@@ -3,7 +3,7 @@
 // @namespace    http://tampermonkey.net/
 // @version      1.9.2
 // @description  Выгрузка товаров (упрощённая для корзины 21vek): Наименование / Остаток / Цена
-// @author       Pavel Yudenka
+// @author       Pavelvl21
 // @match        https://www.21vek.by/*
 // @match        https://sila.by/*
 // @match        https://ozon.by/*
