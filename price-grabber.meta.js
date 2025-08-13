@@ -11,5 +11,5 @@
 // @grant        none
 // @require      https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js
 // @updateURL    https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/price-grabber.meta.js
-// @downloadURL  https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/price-grabber.user.js
+// @downloadURL  https://github.com/Pavelvl21/Price-Grabber/raw/refs/heads/main/price-grabber.user.js
 // ==/UserScript==
