@@ -258,7 +258,9 @@ const collectData21vek = () => {
     const seenNames = new Set();
 
     // 1. Находим контейнер с товарами
-    const productList = document.querySelector('[data-testid="product-list"]');
+    const productList = document.querySelector(
+  '[data-testid="product-list"], [data-testid="product_list"]'
+);
     if (!productList) {
         console.warn('Product list container not found');
         return products;
