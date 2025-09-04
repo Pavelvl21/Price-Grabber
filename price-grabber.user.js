@@ -1,13 +1,14 @@
 // ==UserScript==
-// @name         Price Grabber[21vek.by, sila.by, ozon.by]
+// @name         Price Grabber[21vek.by, sila.by, ozon.by, onliner.by]
 // @namespace    http://tampermonkey.net/
-// @version      1.9.4
+// @version      1.9.5
 // @description  Выгрузка товаров (упрощённая для корзины 21vek): Наименование / Остаток / Цена
 // @author       Pavelvl21
 // @match        https://www.21vek.by/*
 // @match        https://sila.by/*
 // @match        https://ozon.by/*
 // @match        https://www.ozon.by/*
+// @match        https://catalog.onliner.by/*
 // @grant        none
 // @require      https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js
 // @updateURL    https://github.com/Pavelvl21/Price-Grabber/raw/refs/heads/main/price-grabber.meta.js
@@ -405,6 +406,67 @@ const collectData21vek = () => {
   };
 
   /* =========================
+     Сбор данных: onliner.by
+     ========================= */
+  const collectDataOnliner = () => {
+    const products = [];
+    const seenNames = new Set();
+
+    // Находим контейнер с товарами
+    const productContainer = $('.catalog-form__offers');
+    if (!productContainer) {
+      console.warn('Product container not found on onliner.by');
+      return products;
+    }
+
+    // Находим все карточки товаров
+    const productCards = $$('.catalog-form__offers-flex', productContainer);
+    if (!productCards.length) {
+      console.warn('No product cards found on onliner.by');
+      return products;
+    }
+
+    productCards.forEach(card => {
+      try {
+        // Название товара
+        const nameEl = $('.catalog-form__link_primary-additional.catalog-form__link_base-additional.catalog-form__link_font-weight_semibold', card);
+        if (!nameEl) return;
+
+        const name = nameEl.textContent.trim();
+        if (!name || seenNames.has(name)) return;
+        seenNames.add(name);
+
+        // Цена товара
+        const priceEl = $('.catalog-form__link_huge-additional.catalog-form__link_font-weight_bold', card);
+        let price = 0;
+
+        if (priceEl) {
+          // Ищем span с ценой (исключаем текст "от")
+          const priceSpan = Array.from(priceEl.querySelectorAll('span')).find(span => {
+            return span.textContent.includes('р.') || span.textContent.includes('руб');
+          });
+
+          if (priceSpan) {
+            price = formatPrice(priceSpan.textContent);
+          } else {
+            // Если не нашли span с ценой, пробуем извлечь из всего текста
+            price = formatPrice(priceEl.textContent);
+          }
+        }
+
+        products.push({
+          'Наименование': name,
+          'Цена': price
+        });
+      } catch (e) {
+        console.error('Error processing onliner product card:', e);
+      }
+    });
+
+    return products;
+  };
+
+  /* =========================
      Сбор данных: /order/ (21vek) — УПРОЩЁННО (только Наименование / Остаток / Цена)
      ========================= */
   const collectDataOrder = () => {
@@ -508,9 +570,12 @@ const collectData21vek = () => {
   const generateExcel = () => {
     const isSila = location.hostname.includes('sila.by');
     const isOzon = location.hostname.includes('ozon');
+    const isOnliner = location.hostname.includes('onliner.by');
     let products = [];
+
     if (isSila) products = collectDataSila();
     else if (isOzon) products = collectDataOzon();
+    else if (isOnliner) products = collectDataOnliner();
     else if (location.hostname.includes('21vek.by') && location.pathname.startsWith('/order/')) products = collectDataOrder();
     else products = collectData21vek();
 
@@ -525,7 +590,7 @@ const collectData21vek = () => {
     setColumnWidths(ws, products);
     XLSX.utils.book_append_sheet(wb, ws, 'Товары');
 
-    const site = isSila ? 'sila' : (isOzon ? 'ozon' : '21vek');
+    const site = isSila ? 'sila' : (isOzon ? 'ozon' : (isOnliner ? 'onliner' : '21vek'));
     const filename = `Товары_${site}_${nowFilenameStamp()}.xlsx`;
     try {
       XLSX.writeFile(wb, filename);
@@ -712,90 +777,127 @@ const collectData21vek = () => {
      Кнопка увеличения количества на /order/
      ========================= */
   const createIncreaseQuantityButton = () => {
-    if (!location.hostname.includes('21vek.by') || !location.pathname.startsWith('/order/')) return;
-    if (document.querySelector('button[data-safe-script-btn="increaseqty"]')) return;
+  if (!location.hostname.includes('21vek.by') || !location.pathname.startsWith('/order/')) return;
+  if (document.querySelector('button[data-safe-script-btn="increaseqty"]')) return;
 
-    const element = document.createElement('button');
-    element.setAttribute('data-safe-script-btn', 'increaseqty');
-    const { btn, icon, text, disableHover, enableHover } = styleMainButton(element, '➕', 'FILL DA BAG!');
-    const spinner = createSmallSpinner();
-    btn.addEventListener('click', async () => {
-      disableHover();
-      btn.style.width = `${CFG.BTN_SIZE}px`;
-      icon.style.opacity = '1';
-      text.style.opacity = '0';
-      btn.disabled = true;
-      blockScreen(true);
+  const element = document.createElement('button');
+  element.setAttribute('data-safe-script-btn', 'increaseqty');
+  const { btn, icon, text, disableHover, enableHover } = styleMainButton(element, '➕', 'FILL DA BAG!');
+  const spinner = createSmallSpinner();
 
-      const inputs = Array.from(document.querySelectorAll('input[type="number"]')).filter(i => i.offsetParent !== null);
-      if (!inputs.length) {
-        alert('Количество товаров не найдено!');
-        btn.disabled = false;
-        blockScreen(false);
-        enableHover();
-        return;
+  btn.addEventListener('click', async () => {
+    disableHover();
+    btn.style.width = `${CFG.BTN_SIZE}px`;
+    icon.style.opacity = '1';
+    text.style.opacity = '0';
+    btn.disabled = true;
+    blockScreen(true);
+
+    const inputs = Array.from(document.querySelectorAll('input[type="number"]'))
+      .filter(i => i.offsetParent !== null);
+
+    if (!inputs.length) {
+      alert('Количество товаров не найдено!');
+      btn.disabled = false;
+      blockScreen(false);
+      enableHover();
+      return;
+    }
+
+    // ========== новые хелперы ==========
+
+    const parseMaxFromContainer = (container) => {
+      const el = container.querySelector('div[class*="BasketItem_quantity__"]');
+      if (!el) return null;
+      const m = (el.textContent || '').replace(/\s+/g, ' ').match(/Доступно\s+(\d+)/i);
+      return m ? parseInt(m[1], 10) : null;
+    };
+
+    const waitForAvailableMax = async (container, timeout = CFG.DEFAULTS.INCREASE_WAIT_TIMEOUT) => {
+      const POLL = CFG.DEFAULTS.INCREASE_WAIT_POLL;
+      const deadline = Date.now() + timeout;
+      let n = parseMaxFromContainer(container);
+      if (Number.isInteger(n)) return n;
+      while (Date.now() < deadline) {
+        await sleep(POLL);
+        n = parseMaxFromContainer(container);
+        if (Number.isInteger(n)) return n;
       }
+      return null;
+    };
 
-      let totalPriceElem = document.querySelector('[data-testid="total-price"], .order-summary-total, .order-total, #total-price, .total-price');
+    const waitForInputChange = async (input, oldValue, timeout = CFG.DEFAULTS.INCREASE_WAIT_TIMEOUT) => {
+      const POLL = CFG.DEFAULTS.INCREASE_WAIT_POLL;
+      const deadline = Date.now() + timeout;
+      while (Date.now() < deadline) {
+        await sleep(POLL);
+        if (input.value !== oldValue) return input.value;
+      }
+      return input.value;
+    };
 
-      const getTotalPriceValue = () => {
-        if (!totalPriceElem) {
-          totalPriceElem = document.querySelector('[data-testid="total-price"], .order-summary-total, .order-total, #total-price, .total-price');
-          if (!totalPriceElem) return 0;
-        }
-        const txt = (totalPriceElem.textContent || '').replace(/[^\d]/g, '');
-        return parseInt(txt, 10) || 0;
-      };
+    // ========== основной цикл по товарам ==========
+    for (const input of inputs) {
+      const container =
+        input.closest('.basket-item, .cart-item, [class*="BasketItem_topBlock"]') || document;
 
-      const waitPriceChange = async (oldPrice, timeout = CFG.DEFAULTS.INCREASE_WAIT_TIMEOUT) => {
-        const POLL = CFG.DEFAULTS.INCREASE_WAIT_POLL;
-        let waited = 0;
-        return new Promise(resolve => {
-          const interval = setInterval(() => {
-            const nv = getTotalPriceValue();
-            if (nv !== oldPrice) {
-              clearInterval(interval);
-              resolve(nv);
-            }
-            waited += POLL;
-            if (waited >= timeout) {
-              clearInterval(interval);
-              resolve(oldPrice);
-            }
-          }, POLL);
-        });
-      };
-
-      let currentPrice = getTotalPriceValue();
-
-      for (const input of inputs) {
+      // если уже видим "Доступно N"
+      const alreadyMax = parseMaxFromContainer(container);
+      if (Number.isInteger(alreadyMax) && alreadyMax > 0) {
         try {
           const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-          nativeSetter.call(input, 9999);
-          input.dispatchEvent(new Event('input', { bubbles: true }));
-          input.dispatchEvent(new Event('change', { bubbles: true }));
+          nativeSetter.call(input, alreadyMax);
         } catch (e) {
-          input.value = 9999;
-          input.dispatchEvent(new Event('input', { bubbles: true }));
-          input.dispatchEvent(new Event('change', { bubbles: true }));
+          input.value = alreadyMax;
         }
-
-        const newPrice = await waitPriceChange(currentPrice, 1000);
-        if (newPrice !== currentPrice) {
-          await sleep(500 + Math.random() * 500);
-          currentPrice = newPrice;
-        } else {
-          await sleep(1000);
-        }
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        input.dispatchEvent(new Event('blur', { bubbles: true }));
+        await sleep(80 + Math.random() * 80);
+        continue;
       }
 
-      blockScreen(false);
-      btn.disabled = false;
-      enableHover();
-    });
+      // иначе ставим очень большое число, чтобы страница сама урезала
+      const prev = input.value;
+      try {
+        const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+        nativeSetter.call(input, 999999);
+      } catch (e) {
+        input.value = 999999;
+      }
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      input.dispatchEvent(new Event('blur', { bubbles: true }));
 
-    document.body.appendChild(btn);
-  };
+      // ждём максимум
+      const maxFromLabel = await waitForAvailableMax(container, CFG.DEFAULTS.INCREASE_WAIT_TIMEOUT);
+
+      if (Number.isInteger(maxFromLabel) && maxFromLabel > 0) {
+        try {
+          const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+          nativeSetter.call(input, maxFromLabel);
+        } catch (e) {
+          input.value = maxFromLabel;
+        }
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        input.dispatchEvent(new Event('blur', { bubbles: true }));
+      } else {
+        // fallback: ждём пока input сам изменится
+        await waitForInputChange(input, prev, CFG.DEFAULTS.INCREASE_WAIT_TIMEOUT);
+      }
+
+      await sleep(80 + Math.random() * 80); // небольшая пауза
+    }
+
+    blockScreen(false);
+    btn.disabled = false;
+    enableHover();
+  });
+
+  document.body.appendChild(btn);
+};
+
 
   /* =========================
      Инициализация
