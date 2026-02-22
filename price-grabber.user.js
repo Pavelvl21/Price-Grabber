@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Price Grabber[21vek.by, sila.by, ozon.by, onliner.by, dns-shop.by]
 // @namespace    http://tampermonkey.net/
-// @version      1.9.6
-// @description  Выгрузка товаров (упрощённая для корзины 21vek): Наименование / Остаток / Цена
+// @version      1.9.8
+// @description  Выгрузка публичных данных товаров (названия и цены). ВНИМАНИЕ: Автор не несет ответственности за использование скрипта. Скрипт собирает только общедоступную информацию, видимую на страницах каталога. Любое использование в коммерческих целях или для сбора непубличных данных осуществляется на ваш страх и риск.
 // @author       Pavelvl21
 // @match        https://www.21vek.by/*
 // @match        https://sila.by/*
@@ -20,6 +20,24 @@
   'use strict';
 
   /* =========================
+     ПРАВОВОЕ ПРЕДУПРЕЖДЕНИЕ
+     ========================= */
+  /**
+   * Данный скрипт предназначен ТОЛЬКО для сбора публичной информации,
+   * которая явно отображается на страницах каталога (названия товаров, цены).
+   *
+   * Автор не несет ответственности за:
+   * - использование скрипта в коммерческих целях
+   * - сбор непубличных данных (остатков, персональной информации и т.д.)
+   * - нарушение условий использования сайтов
+   * - любые последствия, связанные с применением скрипта
+   *
+   * Скрипт предоставляется "как есть" для личного некоммерческого использования.
+   * Перед использованием ознакомьтесь с законодательством вашей страны и
+   * условиями использования соответствующих сайтов.
+   */
+
+  /* =========================
      Конфигурация / константы
      ========================= */
   const CFG = {
@@ -27,9 +45,9 @@
     BTN_EXPANDED_WIDTH: 180,
     BTN_COLOR_GRADIENT: 'linear-gradient(145deg, #f6d365 0%, #fda085 100%)',
     FONT_URL: 'https://fonts.googleapis.com/css2?family=Poppins:wght@800&display=swap',
-    NUMERIC_HEADERS: ['Остаток', 'Цена', 'Цена со скидкой', 'Цена без скидки'],
+    NUMERIC_HEADERS: ['Цена', 'Цена со скидкой', 'Цена без скидки'],
     DEFAULTS: {
-      ADD_BATCH_SIZE: 6, // пакетное добавление в корзину
+      ADD_BATCH_SIZE: 6,
       ADD_INTRA_MIN: 40,
       ADD_INTRA_MAX: 140,
       ADD_BATCH_DELAY_MIN: 300,
@@ -98,7 +116,6 @@
       padding: '0'
     });
 
-    // очистим содержимое и создадим иконку и текст (абсолютно центрируем)
     btnElement.innerHTML = '';
 
     const icon = document.createElement('span');
@@ -159,7 +176,7 @@
   };
 
   /* =========================
-     Спиннер (создаётся как отдельный элемент)
+     Спиннер
      ========================= */
   const createSmallSpinner = () => {
     const spinner = document.createElement('div');
@@ -193,7 +210,6 @@
      Экран-блок (overlay)
      ========================= */
   const blockScreen = (show) => {
-
     const ID = 'overlay-block';
     let overlay = document.getElementById(ID);
     if (show) {
@@ -239,13 +255,12 @@
   };
 
   /* =========================
-     Извлечение данных item (sila) — аккуратно парсим dataLayer.push({...})
+     Извлечение данных item (sila)
      ========================= */
   const extractItemData = (onClickAttr) => {
     try {
       const match = (onClickAttr || '').match(/dataLayer\.push\((\{[\s\S]*?\})\)/);
       if (!match) return null;
-      // Используем Function для безопасного выполнения литерала объекта
       return Function('return ' + match[1])();
     } catch (e) {
       return null;
@@ -259,7 +274,6 @@
     const products = [];
     const seenNames = new Set();
 
-    // 1. Находим контейнер с товарами
     const productList = document.querySelector(
       '[data-testid="product-list"], [data-testid="product_list"]'
     );
@@ -268,17 +282,14 @@
       return products;
     }
 
-    // 2. Используем $$ для поиска карточек товаров внутри контейнера, исключая product-block
     const productCards = $$('[data-testid^="product-"]:not([data-testid="product-block"])', productList);
     if (!productCards.length) {
       console.warn('No product cards found');
       return products;
     }
 
-    // 3. Обрабатываем каждую карточку
     productCards.forEach(card => {
       try {
-        // 4. Используем $$ для поиска элементов внутри карточки
         const nameEl = $('[data-testid="card-info"]', card);
         const priceEl = $('[data-testid="card-current-price"]', card);
         const oldPriceEl = $('[data-testid="card-old-price"]', card);
@@ -289,11 +300,9 @@
         if (seenNames.has(name)) return;
         seenNames.add(name);
 
-        // 5. Форматируем цены
         const currentPrice = formatPrice(priceEl.textContent);
         const oldPrice = oldPriceEl ? formatPrice(oldPriceEl.textContent) : currentPrice;
 
-        // 6. Добавляем товар
         products.push({
           'Наименование': name,
           'Цена без скидки': oldPrice,
@@ -309,7 +318,7 @@
   };
 
   /* =========================
-     Сбор данных: sila (каталог) — исправлена обработка ключа
+     Сбор данных: sila (каталог) - БЕЗ остатков
      ========================= */
   const collectDataSila = () => {
     const products = [];
@@ -330,15 +339,11 @@
         const article = (item.item_category4 || '').replace(item.item_brand || '', '').trim();
         const price = parseFloat(item.price) || 0;
         const discount = parseFloat(item.discount) || 0;
-        const stockW = parseInt(item.instock) || 0;
-        const stockS = parseInt(item.instore) || 0;
+
         products.push({
           Категория: item.item_category5 || '',
           Бренд: brand,
           Артикул: article,
-          'Остаток на складе': stockW,
-          'Остаток в магазинах': stockS,
-          'Итого в наличии': stockW + stockS,
           'Цена без скидки': formatPrice(price + discount),
           'Цена со скидкой': formatPrice(price),
         });
@@ -359,7 +364,6 @@
     const paginator = document.querySelector('div[data-widget="infiniteVirtualPaginator"]#paginator') || document.querySelector('div[data-widget="infiniteVirtualPaginator"], #paginator');
     const root = paginator || document;
 
-    // Попробуем извлечь карточки: приоритет — элементы с data-index, затем стандартные классы tile-root/oi3_24
     let cards = Array.from(root.querySelectorAll('[data-index]')).filter(el => el.offsetParent !== null);
     if (!cards.length) {
       cards = Array.from(root.querySelectorAll('.tile-root, .oi3_24, .oi3_24.tile-root')).filter(el => el.offsetParent !== null);
@@ -367,7 +371,6 @@
 
     cards.forEach(card => {
       try {
-        // Название — обычно внутри a.tile-clickable-element > div.bq02_5_0-a > span.tsBody500Medium
         let titleEl = card.querySelector('a.tile-clickable-element .bq02_5_0-a span.tsBody500Medium')
           || card.querySelector('div.bq02_5_0-a span.tsBody500Medium')
           || card.querySelector('span.tsBody500Medium')
@@ -378,15 +381,12 @@
         let title = titleEl.textContent.trim();
         if (!title) return;
 
-        // Обрезаем до первой запятой
         title = title.split(',').slice(0, 2).join(',').trim();
         if (!title) return;
         if (seen.has(title)) return;
         seen.add(title);
 
-        // Находим все элементы, содержащие BYN (цены)
         const spansWithBYN = Array.from(card.querySelectorAll('span')).filter(s => /\bBYN\b/.test(s.textContent));
-        // Попытка определить цену со скидкой (обычно headline) и цену без скидки (обычно body control)
         let priceSaleEl = spansWithBYN.find(s => /Headline|tsHeadline500Medium/.test(s.className)) || spansWithBYN[0];
         let priceOldEl = spansWithBYN.find(s => s !== priceSaleEl && /BodyControl|tsBodyControl400Small|tsBodyControl/.test(s.className)) || spansWithBYN.find(s => s !== priceSaleEl);
 
@@ -413,14 +413,12 @@
     const products = [];
     const seenNames = new Set();
 
-    // Находим контейнер с товарами
     const productContainer = $('.catalog-form__offers');
     if (!productContainer) {
       console.warn('Product container not found on onliner.by');
       return products;
     }
 
-    // Находим все карточки товаров
     const productCards = $$('.catalog-form__offers-flex', productContainer);
     if (!productCards.length) {
       console.warn('No product cards found on onliner.by');
@@ -429,7 +427,6 @@
 
     productCards.forEach(card => {
       try {
-        // Название товара
         const nameEl = $('.catalog-form__link_primary-additional.catalog-form__link_base-additional.catalog-form__link_font-weight_semibold', card);
         if (!nameEl) return;
 
@@ -437,12 +434,10 @@
         if (!name || seenNames.has(name)) return;
         seenNames.add(name);
 
-        // Цена товара
         const priceEl = $('.catalog-form__link_huge-additional.catalog-form__link_font-weight_bold', card);
         let price = 0;
 
         if (priceEl) {
-          // Ищем span с ценой (исключаем текст "от")
           const priceSpan = Array.from(priceEl.querySelectorAll('span')).find(span => {
             return span.textContent.includes('р.') || span.textContent.includes('руб');
           });
@@ -450,7 +445,6 @@
           if (priceSpan) {
             price = formatPrice(priceSpan.textContent);
           } else {
-            // Если не нашли span с ценой, пробуем извлечь из всего текста
             price = formatPrice(priceEl.textContent);
           }
         }
@@ -468,124 +462,52 @@
   };
 
   /* =========================
-     Сбор данных: /order/ (21vek) — УПРОЩЁННО (только Наименование / Остаток / Цена)
-     ========================= */
-  const collectDataOrder = () => {
-    const products = [];
-    const seenItems = new Set();
-
-    // На разных шаблонах страницы корзины селекторы могут отличаться — пробуем несколько вариантов
-    const blocks = document.querySelectorAll('div[class*="BasketItem_topBlock"], .BasketItem_topBlock__U4bk8, .basket-item, .cart-item');
-    blocks.forEach(block => {
-      // Название товара
-      const titleEl = block.querySelector('a[class*="BasketItem_title"], a.BasketItem_title__MzCQ9, [data-testid="product-name"], .product-name, .cart-item__title, a');
-      // Поле количества
-      const qtyInput = block.querySelector('input[class*="Counter_counterInput"], input.Counter_counterInput__idJlc, input[type="number"], input.qty, input.quantity');
-      // Блок с ценой (итоговая цена за позицию)
-      const priceBlock = block.querySelector('div[class*="PriceBlock_priceBlock"], .PriceBlock_priceBlock__bLP4B, .cart-item__price, .price, [data-testid="product-price"]');
-
-      if (!titleEl || !qtyInput || !priceBlock) return;
-
-      const title = titleEl.textContent.trim();
-      if (!title) return;
-      if (seenItems.has(title)) return;
-      seenItems.add(title);
-
-      const stock = parseInt(qtyInput.value, 10) || 0;
-      const priceText = priceBlock.textContent.trim();
-      const totalPrice = formatPrice(priceText);
-      const unitPrice = stock > 0 ? +(totalPrice / stock).toFixed(2) : totalPrice;
-
-      products.push({
-        'Наименование': title,
-        'Остаток': stock,
-        'Цена': unitPrice
-      });
-    });
-
-    // Fallback: если не найдено блоков, попробуем собрать через inputs на странице (последняя надежда)
-    if (!products.length) {
-      const inputs = Array.from(document.querySelectorAll('input[type="number"]')).filter(i => i.offsetParent !== null);
-      const titles = Array.from(document.querySelectorAll('a, .product-name, [data-testid="product-name"]')).map(n => n.textContent && n.textContent.trim()).filter(Boolean);
-      // Если есть хотя бы одно title и inputs сопоставимы по длине — составим простой список
-      if (inputs.length && titles.length) {
-        for (let i = 0; i < Math.min(inputs.length, titles.length); i++) {
-          const stock = parseInt(inputs[i].value, 10) || 0;
-          // Попытка найти рядом цену — не гарантировано, но попробуем
-          const priceAncestor = inputs[i].closest('.cart-item') || inputs[i].closest('.BasketItem_topBlock') || inputs[i].parentElement;
-          const priceBlock = priceAncestor ? (priceAncestor.querySelector('.price, [data-testid="product-price"], .cart-item__price') || priceAncestor) : null;
-          const totalPrice = priceBlock ? formatPrice(priceBlock.textContent || '') : 0;
-          const unitPrice = stock > 0 ? +(totalPrice / stock).toFixed(2) : totalPrice;
-          products.push({
-            'Наименование': titles[i],
-            'Остаток': stock,
-            'Цена': unitPrice
-          });
-        }
-      }
-    }
-
-    return products;
-  };
-
-  /* =========================
      Сбор данных: dns-shop.by
      ========================= */
   const collectDataDnsShop = () => {
     const products = [];
     const seenNames = new Set();
 
-    // 1. Находим контейнер с товарами
     const productContainer = $('.catalog-category-products__product-list-wrapper');
     if (!productContainer) {
       console.warn('Product container not found on dns-shop.by');
       return products;
     }
 
-    // 2. Находим все карточки товаров внутри контейнера
     const productCards = $$('.catalog-category-product', productContainer);
     if (!productCards.length) {
       console.warn('No product cards found on dns-shop.by');
       return products;
     }
 
-    // 3. Обрабатываем каждую карточку товара
     productCards.forEach(card => {
       try {
-        // 4. Извлекаем название товара
         const nameElement = $('.catalog-category-product__title', card);
         if (!nameElement) return;
 
         let name = nameElement.textContent.trim();
         if (!name) return;
 
-        // 5. Обрезаем название до квадратной скобки "["
         const bracketIndex = name.indexOf('[');
         if (bracketIndex !== -1) {
           name = name.substring(0, bracketIndex).trim();
         }
 
-        // Убираем лишние пробелы
         name = name.replace(/\s+/g, ' ').trim();
         if (!name) return;
 
-        // Проверяем дубликаты
         if (seenNames.has(name)) return;
         seenNames.add(name);
 
-        // 6. Извлекаем цену
         let price = 0;
-        // Ищем цену в двух возможных контейнерах
         const priceElement = $('.catalog-product-purchase__current-price.catalog-product-purchase__current-price_sale', card) ||
                              $('.catalog-product-purchase__current-price', card);
 
         if (priceElement) {
           const priceText = priceElement.textContent.trim();
-          // Форматируем цену: удаляем пробелы, "BYN" и приводим к числу
           price = formatPrice(priceText);
         }
 
-        // 7. Добавляем товар в массив
         products.push({
           'Наименование': name,
           'Цена': price
@@ -614,7 +536,6 @@
         const cellAddr = XLSX.utils.encode_cell({ r, c });
         const cell = ws[cellAddr];
         if (cell) {
-          // Попытка привести к числу
           const n = parseFloat(String(cell.v).toString().replace(',', '.').replace(/[^\d\-.]/g, ''));
           if (!isNaN(n)) {
             cell.v = n;
@@ -634,11 +555,13 @@
         String(key).length,
         ...data.map(row => String(row[key] || '').length)
       );
-      // конвертируем в ширину столбца (приблизительно)
       return { width: Math.min(Math.max(Math.round(maxLen * 1.2), 10), 50) };
     });
   };
 
+  /* =========================
+     Генерация Excel
+     ========================= */
   const generateExcel = () => {
     const isSila = location.hostname.includes('sila.by');
     const isOzon = location.hostname.includes('ozon');
@@ -654,8 +577,6 @@
       products = collectDataOnliner();
     } else if (isDnsShop) {
       products = collectDataDnsShop();
-    } else if (location.hostname.includes('21vek.by') && location.pathname.startsWith('/order/')) {
-      products = collectDataOrder();
     } else {
       products = collectData21vek();
     }
@@ -676,169 +597,8 @@
     try {
       XLSX.writeFile(wb, filename);
     } catch (e) {
-      // fallback
       alert('Ошибка при сохранении файла: ' + (e && e.message ? e.message : e));
     }
-  };
-
-  /* =========================
-     Работа с кнопками "Добавить в корзину"
-     ========================= */
-  const getCartButtons = () => {
-    const all = Array.from(document.querySelectorAll('button[data-testid="card-basket-action"], button.add-to-cart, button.basket-action'));
-    return all.filter(b => {
-      if (b.closest('[data-testid="product-block"]')) return false;
-      const txt = (b.textContent || '').trim();
-      if (!txt) return false;
-      return !txt.includes('В корзине') && !txt.includes('Уведомить') && !txt.includes('Добавлен');
-    });
-  };
-
-  const safeClick = (el) => {
-    try {
-      el.click();
-      return true;
-    } catch (e) {
-      try {
-        el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-        return true;
-      } catch (e2) {
-        return false;
-      }
-    }
-  };
-
-  /* =========================
-     Создание кнопки "ADD 'EM ALL!"
-     ========================= */
-  const createAddToCartButton = () => {
-    if (!location.hostname.includes('21vek.by')) return;
-    if (document.querySelector('button[data-safe-script-btn="addtocart"]')) return;
-
-    const raw = document.createElement('button');
-    raw.setAttribute('data-safe-script-btn', 'addtocart');
-
-    const { btn, icon, text, disableHover, enableHover } = styleMainButton(raw, '🛒', "ADD 'EM ALL!");
-
-    // Спиннер создаётся и управляется (не обязательно прикрепляется к кнопке)
-    const spinner = createSmallSpinner();
-
-    btn.dataset.state = 'ready';
-
-    const setAllInBagState = () => {
-      btn.dataset.state = 'done';
-      btn.disabled = true;
-      icon.textContent = '🛒';
-      icon.style.opacity = '1';
-      text.innerHTML = '😎 All in da bag! 😎';
-      text.style.opacity = '0';
-      btn.style.width = `${CFG.BTN_SIZE}px`;
-      spinner.style.display = 'none';
-      enableHover();
-    };
-
-    if (!getCartButtons().length) setAllInBagState();
-
-    btn.addEventListener('click', async () => {
-      if (btn.dataset.state === 'working') return;
-
-      let buttons = getCartButtons();
-      if (!buttons.length) {
-        setAllInBagState();
-        return;
-      }
-
-      btn.dataset.state = 'working';
-      btn.disabled = true;
-      disableHover();
-      spinner.style.display = 'block';
-      btn.style.width = `${CFG.BTN_SIZE}px`;
-      icon.textContent = '';
-      icon.style.opacity = '1';
-      text.textContent = `0/${buttons.length}`;
-      text.style.opacity = '1';
-
-      blockScreen(true);
-
-      const {
-        ADD_BATCH_SIZE, ADD_INTRA_MIN, ADD_INTRA_MAX,
-        ADD_BATCH_DELAY_MIN, ADD_BATCH_DELAY_MAX,
-        ADD_WAIT_POLL, ADD_WAIT_TIMEOUT,
-        ADD_MAX_LOOPS
-      } = {
-        ADD_BATCH_SIZE: CFG.DEFAULTS.ADD_BATCH_SIZE,
-        ADD_INTRA_MIN: CFG.DEFAULTS.ADD_INTRA_MIN,
-        ADD_INTRA_MAX: CFG.DEFAULTS.ADD_INTRA_MAX,
-        ADD_BATCH_DELAY_MIN: CFG.DEFAULTS.ADD_BATCH_DELAY_MIN,
-        ADD_BATCH_DELAY_MAX: CFG.DEFAULTS.ADD_BATCH_DELAY_MAX,
-        ADD_WAIT_POLL: CFG.DEFAULTS.ADD_WAIT_POLL,
-        ADD_WAIT_TIMEOUT: CFG.DEFAULTS.ADD_WAIT_TIMEOUT,
-        ADD_MAX_LOOPS: CFG.DEFAULTS.ADD_MAX_LOOPS
-      };
-
-      const initialTotal = buttons.length;
-      let loops = 0;
-
-      while ((buttons = getCartButtons()).length > 0 && loops < ADD_MAX_LOOPS) {
-        loops++;
-        const before = buttons.length;
-        const batch = buttons.slice(0, ADD_BATCH_SIZE);
-
-        for (const b of batch) {
-          try { safeClick(b); } catch (e) { /* noop */ }
-          await sleep(randBetween(ADD_INTRA_MIN, ADD_INTRA_MAX));
-        }
-
-        // ждать уменьшения числа доступных кнопок
-        let waited = 0;
-        while (waited < ADD_WAIT_TIMEOUT) {
-          await sleep(ADD_WAIT_POLL);
-          waited += ADD_WAIT_POLL;
-          const nowLen = getCartButtons().length;
-          if (nowLen < before) break;
-        }
-
-        const nowRemaining = getCartButtons().length;
-        const processed = Math.max(0, initialTotal - nowRemaining);
-        text.textContent = `${processed}/${initialTotal}`;
-
-        await sleep(randBetween(ADD_BATCH_DELAY_MIN, ADD_BATCH_DELAY_MAX));
-      }
-
-      blockScreen(false);
-
-      const finalRemaining = getCartButtons().length;
-      if (!finalRemaining) setAllInBagState();
-      else {
-        btn.dataset.state = 'ready';
-        btn.disabled = false;
-        icon.textContent = '🛒';
-        icon.style.opacity = '1';
-        text.textContent = "ADD 'EM ALL!";
-        text.style.opacity = '0';
-        spinner.style.display = 'none';
-        btn.style.width = `${CFG.BTN_SIZE}px`;
-        enableHover();
-      }
-    });
-
-    // наблюдатель: вернуть кнопку в ready если появились новые товары
-    const observer = new MutationObserver(() => {
-      if (!document.body.contains(btn)) { observer.disconnect(); return; }
-      if (btn.dataset.state === 'done' && getCartButtons().length > 0) {
-        btn.dataset.state = 'ready';
-        btn.disabled = false;
-        icon.textContent = '🛒';
-        icon.style.opacity = '1';
-        text.textContent = "ADD 'EM ALL!";
-        text.style.opacity = '0';
-        btn.style.width = `${CFG.BTN_SIZE}px`;
-        enableHover();
-      }
-    });
-    observer.observe(document.body, { childList: true, subtree: true });
-
-    document.body.appendChild(btn);
   };
 
   /* =========================
@@ -855,139 +615,10 @@
   };
 
   /* =========================
-     Кнопка увеличения количества на /order/
-     ========================= */
-  const createIncreaseQuantityButton = () => {
-    if (!location.hostname.includes('21vek.by') || !location.pathname.startsWith('/order/')) return;
-    if (document.querySelector('button[data-safe-script-btn="increaseqty"]')) return;
-
-    const element = document.createElement('button');
-    element.setAttribute('data-safe-script-btn', 'increaseqty');
-    const { btn, icon, text, disableHover, enableHover } = styleMainButton(element, '➕', 'FILL DA BAG!');
-    const spinner = createSmallSpinner();
-
-    btn.addEventListener('click', async () => {
-      disableHover();
-      btn.style.width = `${CFG.BTN_SIZE}px`;
-      icon.style.opacity = '1';
-      text.style.opacity = '0';
-      btn.disabled = true;
-      blockScreen(true);
-
-      const inputs = Array.from(document.querySelectorAll('input[type="number"]'))
-        .filter(i => i.offsetParent !== null);
-
-      if (!inputs.length) {
-        alert('Количество товаров не найдено!');
-        btn.disabled = false;
-        blockScreen(false);
-        enableHover();
-        return;
-      }
-
-      // ========== новые хелперы ==========
-
-      const parseMaxFromContainer = (container) => {
-        const el = container.querySelector('div[class*="BasketItem_quantity__"]');
-        if (!el) return null;
-        const m = (el.textContent || '').replace(/\s+/g, ' ').match(/Доступно\s+(\d+)/i);
-        return m ? parseInt(m[1], 10) : null;
-      };
-
-      const waitForAvailableMax = async (container, timeout = CFG.DEFAULTS.INCREASE_WAIT_TIMEOUT) => {
-        const POLL = CFG.DEFAULTS.INCREASE_WAIT_POLL;
-        const deadline = Date.now() + timeout;
-        let n = parseMaxFromContainer(container);
-        if (Number.isInteger(n)) return n;
-        while (Date.now() < deadline) {
-          await sleep(POLL);
-          n = parseMaxFromContainer(container);
-          if (Number.isInteger(n)) return n;
-        }
-        return null;
-      };
-
-      const waitForInputChange = async (input, oldValue, timeout = CFG.DEFAULTS.INCREASE_WAIT_TIMEOUT) => {
-        const POLL = CFG.DEFAULTS.INCREASE_WAIT_POLL;
-        const deadline = Date.now() + timeout;
-        while (Date.now() < deadline) {
-          await sleep(POLL);
-          if (input.value !== oldValue) return input.value;
-        }
-        return input.value;
-      };
-
-      // ========== основной цикл по товарам ==========
-      for (const input of inputs) {
-        const container =
-          input.closest('.basket-item, .cart-item, [class*="BasketItem_topBlock"]') || document;
-
-        // если уже видим "Доступно N"
-        const alreadyMax = parseMaxFromContainer(container);
-        if (Number.isInteger(alreadyMax) && alreadyMax > 0) {
-          try {
-            const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-            nativeSetter.call(input, alreadyMax);
-          } catch (e) {
-            input.value = alreadyMax;
-          }
-          input.dispatchEvent(new Event('input', { bubbles: true }));
-          input.dispatchEvent(new Event('change', { bubbles: true }));
-          input.dispatchEvent(new Event('blur', { bubbles: true }));
-          await sleep(80 + Math.random() * 80);
-          continue;
-        }
-
-        // иначе ставим очень большое число, чтобы страница сама урезала
-        const prev = input.value;
-        try {
-          const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-          nativeSetter.call(input, 999999);
-        } catch (e) {
-          input.value = 999999;
-        }
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-        input.dispatchEvent(new Event('change', { bubbles: true }));
-        input.dispatchEvent(new Event('blur', { bubbles: true }));
-
-        // ждём максимум
-        const maxFromLabel = await waitForAvailableMax(container, CFG.DEFAULTS.INCREASE_WAIT_TIMEOUT);
-
-        if (Number.isInteger(maxFromLabel) && maxFromLabel > 0) {
-          try {
-            const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-            nativeSetter.call(input, maxFromLabel);
-          } catch (e) {
-            input.value = maxFromLabel;
-          }
-          input.dispatchEvent(new Event('input', { bubbles: true }));
-          input.dispatchEvent(new Event('change', { bubbles: true }));
-          input.dispatchEvent(new Event('blur', { bubbles: true }));
-        } else {
-          // fallback: ждём пока input сам изменится
-          await waitForInputChange(input, prev, CFG.DEFAULTS.INCREASE_WAIT_TIMEOUT);
-        }
-
-        await sleep(80 + Math.random() * 80); // небольшая пауза
-      }
-
-      blockScreen(false);
-      btn.disabled = false;
-      enableHover();
-    });
-
-    document.body.appendChild(btn);
-  };
-
-  /* =========================
      Инициализация
      ========================= */
   const init = () => {
     createExportButton();
-    if (location.hostname.includes('21vek.by')) {
-      if (location.pathname.startsWith('/order/')) createIncreaseQuantityButton();
-      else createAddToCartButton();
-    }
   };
 
   setTimeout(init, 200);
