@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Price Grabber[21vek.by, sila.by, ozon.by, onliner.by, dns-shop.by, emall.by]
+// @name         Price Grabber[21vek.by, sila.by, ozon.by, onliner.by, dns-shop.by, emall.by, atlant-td.by]
 // @namespace    http://tampermonkey.net/
-// @version      1.9.9
+// @version      2.0.0
 // @description  Выгрузка публичных данных товаров (названия и цены). ВНИМАНИЕ: Автор не несет ответственности за использование скрипта. Скрипт собирает только общедоступную информацию, видимую на страницах каталога. Любое использование в коммерческих целях или для сбора непубличных данных осуществляется на ваш страх и риск.
 // @author       Pavelvl21
 // @match        https://www.21vek.by/*
@@ -12,6 +12,8 @@
 // @match        https://dns-shop.by/*
 // @match        https://emall.by/*
 // @match        https://www.emall.by/*
+// @match        https://atlant-td.by/*
+// @match        https://www.atlant-td.by/*
 // @grant        none
 // @require      https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js
 // @updateURL    https://github.com/Pavelvl21/Price-Grabber/raw/refs/heads/main/price-grabber.meta.js
@@ -27,13 +29,13 @@
   /**
    * Данный скрипт предназначен ТОЛЬКО для сбора публичной информации,
    * которая явно отображается на страницах каталога (названия товаров, цены).
-   * 
+   *
    * Автор не несет ответственности за:
    * - использование скрипта в коммерческих целях
    * - сбор непубличных данных (остатков, персональной информации и т.д.)
    * - нарушение условий использования сайтов
    * - любые последствия, связанные с применением скрипта
-   * 
+   *
    * Скрипт предоставляется "как есть" для личного некоммерческого использования.
    * Перед использованием ознакомьтесь с законодательством вашей страны и
    * условиями использования соответствующих сайтов.
@@ -341,7 +343,7 @@
         const article = (item.item_category4 || '').replace(item.item_brand || '', '').trim();
         const price = parseFloat(item.price) || 0;
         const discount = parseFloat(item.discount) || 0;
-        
+
         products.push({
           Категория: item.item_category5 || '',
           Бренд: brand,
@@ -530,9 +532,8 @@
     const products = [];
     const seenNames = new Set();
 
-    // Находим все блоки товаров на странице каталога
     const productCards = $$('.vertical_information__v99Cq');
-    
+
     if (!productCards.length) {
       console.warn('No product cards found on emall.by');
       return products;
@@ -540,35 +541,29 @@
 
     productCards.forEach(card => {
       try {
-        // Извлекаем название товара из тега <a> с классом vertical_title__FM_Ud
         const titleEl = card.querySelector('a.vertical_title__FM_Ud');
         if (!titleEl) return;
-        
+
         let name = titleEl.textContent.trim();
         if (!name) return;
-        
-        // Проверяем на дубликаты
+
         if (seenNames.has(name)) return;
         seenNames.add(name);
 
-        // Ищем блок с ценами
         const priceBlock = card.querySelector('.price_main__ZI_hw');
         if (!priceBlock) return;
 
-        // Извлекаем цену со скидкой (основная цена)
         const salePriceText = priceBlock.childNodes[0]?.textContent?.trim() || '';
         const salePrice = formatPrice(salePriceText);
 
-        // Извлекаем старую цену (без скидки) из span.price_old__OHDzw
         const oldPriceEl = priceBlock.querySelector('.price_old__OHDzw');
-        let oldPrice = salePrice; // По умолчанию равна цене со скидкой
-        
+        let oldPrice = salePrice;
+
         if (oldPriceEl) {
           const oldPriceText = oldPriceEl.textContent.trim();
           oldPrice = formatPrice(oldPriceText);
         }
 
-        // Добавляем товар в результат
         products.push({
           'Наименование': name,
           'Цена без скидки': oldPrice,
@@ -582,6 +577,79 @@
 
     return products;
   };
+
+
+  /* =========================
+   Сбор данных: atlant-td.by
+   ========================= */
+const collectDataAtlant = () => {
+  const products = [];
+  const seenNames = new Set();
+
+  const productCards = $$('.item_info');
+
+  if (!productCards.length) {
+    console.warn('No product cards found on atlant-td.by');
+    return products;
+  }
+
+  productCards.forEach(card => {
+    try {
+      const stockEl = card.querySelector('.item-stock .value.font_sxs');
+      if (!stockEl) return;
+
+      const stockText = stockEl.textContent.trim();
+
+      if (stockText.includes('Нет в наличии')) {
+        console.log('⏭️ Товар пропущен (нет в наличии)');
+        return;
+      }
+
+      const titleEl = card.querySelector('.item-title a.dark_link span');
+      if (!titleEl) return;
+
+      let name = titleEl.textContent.trim();
+      if (!name) return;
+
+      if (seenNames.has(name)) return;
+      seenNames.add(name);
+
+      const priceEl = card.querySelector('.price.font-bold.font_mxs .values_wrapper');
+      if (!priceEl) return;
+
+      const priceText = priceEl.textContent.trim();
+      const price = formatPrice(priceText);
+
+      const articleEl = card.querySelector('.article_block .muted.font_sxs');
+      let article = '';
+      if (articleEl) {
+        const articleText = articleEl.textContent.trim();
+        article = articleText.replace(/^Арт\.:\s*/i, '');
+      }
+
+      // ✅ НОВЫЙ ПОРЯДОК КОЛОНОК: Артикул -> Наименование -> Цена
+      const product = {};
+
+      // 1. Артикул (если есть)
+      if (article) {
+        product['Артикул'] = article;
+      }
+
+      // 2. Наименование
+      product['Наименование'] = name;
+
+      // 3. Цена
+      product['Цена'] = price;
+
+      products.push(product);
+
+    } catch (e) {
+      console.error('Error processing atlant-td.by product card:', e);
+    }
+  });
+
+  return products;
+};
 
   /* =========================
      Excel helpers
@@ -630,6 +698,7 @@
     const isOnliner = location.hostname.includes('onliner.by');
     const isDnsShop = location.hostname.includes('dns-shop.by');
     const isEmall = location.hostname.includes('emall.by');
+    const isAtlant = location.hostname.includes('atlant-td.by');
     let products = [];
 
     if (isSila) {
@@ -642,6 +711,8 @@
       products = collectDataDnsShop();
     } else if (isEmall) {
       products = collectDataEmall();
+    } else if (isAtlant) {
+      products = collectDataAtlant();
     } else {
       products = collectData21vek();
     }
@@ -663,7 +734,8 @@
     else if (isOnliner) site = 'onliner';
     else if (isDnsShop) site = 'dns-shop';
     else if (isEmall) site = 'emall';
-    
+    else if (isAtlant) site = 'atlant-td';
+
     const filename = `Товары_${site}_${nowFilenameStamp()}.xlsx`;
     try {
       XLSX.writeFile(wb, filename);
