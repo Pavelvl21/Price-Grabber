@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Price Grabber[21vek.by, sila.by, ozon.by, onliner.by, dns-shop.by]
+// @name         Price Grabber[21vek.by, sila.by, ozon.by, onliner.by, dns-shop.by, emall.by]
 // @namespace    http://tampermonkey.net/
-// @version      1.9.8
+// @version      1.9.9
 // @description  Выгрузка публичных данных товаров (названия и цены). ВНИМАНИЕ: Автор не несет ответственности за использование скрипта. Скрипт собирает только общедоступную информацию, видимую на страницах каталога. Любое использование в коммерческих целях или для сбора непубличных данных осуществляется на ваш страх и риск.
 // @author       Pavelvl21
 // @match        https://www.21vek.by/*
@@ -10,6 +10,8 @@
 // @match        https://www.ozon.by/*
 // @match        https://catalog.onliner.by/*
 // @match        https://dns-shop.by/*
+// @match        https://emall.by/*
+// @match        https://www.emall.by/*
 // @grant        none
 // @require      https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js
 // @updateURL    https://github.com/Pavelvl21/Price-Grabber/raw/refs/heads/main/price-grabber.meta.js
@@ -25,13 +27,13 @@
   /**
    * Данный скрипт предназначен ТОЛЬКО для сбора публичной информации,
    * которая явно отображается на страницах каталога (названия товаров, цены).
-   *
+   * 
    * Автор не несет ответственности за:
    * - использование скрипта в коммерческих целях
    * - сбор непубличных данных (остатков, персональной информации и т.д.)
    * - нарушение условий использования сайтов
    * - любые последствия, связанные с применением скрипта
-   *
+   * 
    * Скрипт предоставляется "как есть" для личного некоммерческого использования.
    * Перед использованием ознакомьтесь с законодательством вашей страны и
    * условиями использования соответствующих сайтов.
@@ -318,7 +320,7 @@
   };
 
   /* =========================
-     Сбор данных: sila (каталог) - БЕЗ остатков
+     Сбор данных: sila (каталог)
      ========================= */
   const collectDataSila = () => {
     const products = [];
@@ -339,7 +341,7 @@
         const article = (item.item_category4 || '').replace(item.item_brand || '', '').trim();
         const price = parseFloat(item.price) || 0;
         const discount = parseFloat(item.discount) || 0;
-
+        
         products.push({
           Категория: item.item_category5 || '',
           Бренд: brand,
@@ -522,6 +524,66 @@
   };
 
   /* =========================
+     Сбор данных: emall.by
+     ========================= */
+  const collectDataEmall = () => {
+    const products = [];
+    const seenNames = new Set();
+
+    // Находим все блоки товаров на странице каталога
+    const productCards = $$('.vertical_information__v99Cq');
+    
+    if (!productCards.length) {
+      console.warn('No product cards found on emall.by');
+      return products;
+    }
+
+    productCards.forEach(card => {
+      try {
+        // Извлекаем название товара из тега <a> с классом vertical_title__FM_Ud
+        const titleEl = card.querySelector('a.vertical_title__FM_Ud');
+        if (!titleEl) return;
+        
+        let name = titleEl.textContent.trim();
+        if (!name) return;
+        
+        // Проверяем на дубликаты
+        if (seenNames.has(name)) return;
+        seenNames.add(name);
+
+        // Ищем блок с ценами
+        const priceBlock = card.querySelector('.price_main__ZI_hw');
+        if (!priceBlock) return;
+
+        // Извлекаем цену со скидкой (основная цена)
+        const salePriceText = priceBlock.childNodes[0]?.textContent?.trim() || '';
+        const salePrice = formatPrice(salePriceText);
+
+        // Извлекаем старую цену (без скидки) из span.price_old__OHDzw
+        const oldPriceEl = priceBlock.querySelector('.price_old__OHDzw');
+        let oldPrice = salePrice; // По умолчанию равна цене со скидкой
+        
+        if (oldPriceEl) {
+          const oldPriceText = oldPriceEl.textContent.trim();
+          oldPrice = formatPrice(oldPriceText);
+        }
+
+        // Добавляем товар в результат
+        products.push({
+          'Наименование': name,
+          'Цена без скидки': oldPrice,
+          'Цена со скидкой': salePrice
+        });
+
+      } catch (e) {
+        console.error('Error processing emall.by product card:', e);
+      }
+    });
+
+    return products;
+  };
+
+  /* =========================
      Excel helpers
      ========================= */
   const formatNumericColumns = (ws) => {
@@ -567,6 +629,7 @@
     const isOzon = location.hostname.includes('ozon');
     const isOnliner = location.hostname.includes('onliner.by');
     const isDnsShop = location.hostname.includes('dns-shop.by');
+    const isEmall = location.hostname.includes('emall.by');
     let products = [];
 
     if (isSila) {
@@ -577,6 +640,8 @@
       products = collectDataOnliner();
     } else if (isDnsShop) {
       products = collectDataDnsShop();
+    } else if (isEmall) {
+      products = collectDataEmall();
     } else {
       products = collectData21vek();
     }
@@ -592,7 +657,13 @@
     setColumnWidths(ws, products);
     XLSX.utils.book_append_sheet(wb, ws, 'Товары');
 
-    const site = isSila ? 'sila' : (isOzon ? 'ozon' : (isOnliner ? 'onliner' : (isDnsShop ? 'dns-shop' : '21vek')));
+    let site = '21vek';
+    if (isSila) site = 'sila';
+    else if (isOzon) site = 'ozon';
+    else if (isOnliner) site = 'onliner';
+    else if (isDnsShop) site = 'dns-shop';
+    else if (isEmall) site = 'emall';
+    
     const filename = `Товары_${site}_${nowFilenameStamp()}.xlsx`;
     try {
       XLSX.writeFile(wb, filename);
