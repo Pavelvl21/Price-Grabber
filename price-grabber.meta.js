@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Price Grabber[21vek.by, sila.by, ozon.by, onliner.by]
 // @namespace    http://tampermonkey.net/
-// @version      2.0.0
+// @version      2.1.3
 // @description  Выгрузка товаров (упрощённая для корзины 21vek): Наименование / Остаток / Цена
 // @author       Pavelvl21
 // @match        https://www.21vek.by/*
