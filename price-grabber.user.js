@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Price Grabber[21vek.by, sila.by, ozon.by, onliner.by, dns-shop.by, emall.by, atlant-td.by]
 // @namespace    http://tampermonkey.net/
-// @version      2.0.0
+// @version      2.1.3
 // @description  Выгрузка публичных данных товаров (названия и цены). ВНИМАНИЕ: Автор не несет ответственности за использование скрипта. Скрипт собирает только общедоступную информацию, видимую на страницах каталога. Любое использование в коммерческих целях или для сбора непубличных данных осуществляется на ваш страх и риск.
 // @author       Pavelvl21
 // @match        https://www.21vek.by/*
@@ -228,7 +228,7 @@
         fontFamily: "'Courier New', monospace", userSelect: 'none',
       });
       const txt = document.createElement('div');
-      txt.textContent = 'Stackin’ da loot, no talkin’...';
+      txt.textContent = 'Stackin\' da loot, no talkin\'...';
       txt.style.display = 'inline-flex';
       txt.style.alignItems = 'center';
       txt.style.gap = '14px';
@@ -253,9 +253,107 @@
      ========================= */
   const formatPrice = (raw) => {
     if (typeof raw === 'number') return +raw.toFixed(2);
-    const cleaned = (raw || '').toString().replace(/[\u00A0\u202F\u2009\s]/g, '').replace(/[^\d,.]/g, '').replace(',', '.');
+
+    const str = (raw || '').toString().trim();
+
+    // Удаляем все пробелы (обычные, неразрывные, тонкие)
+    let cleaned = str.replace(/[\u00A0\u202F\u2009\s]/g, '');
+
+    // Удаляем "руб.", "коп." и другие текстовые обозначения
+    cleaned = cleaned.replace(/руб\.?|коп\.?|р\.?|BYN|бел\.?\s*руб\.?/gi, '').trim();
+
+    // Если строка пустая - возвращаем 0
+    if (!cleaned) return 0;
+
+    // Удаляем все нецифровые символы кроме точки и запятой
+    const numericPart = cleaned.replace(/[^\d.,]/g, '');
+
+    if (!numericPart) return 0;
+
+    // Если есть и точка и запятая
+    if (numericPart.includes('.') && numericPart.includes(',')) {
+      // Запятая обычно десятичный разделитель в европейском формате
+      cleaned = numericPart.replace(/\./g, '').replace(',', '.');
+    } else if (numericPart.includes('.')) {
+      // Только точки
+      const parts = numericPart.split('.');
+      if (parts.length > 2) {
+        // Несколько точек - разделители тысяч
+        cleaned = numericPart.replace(/\./g, '');
+      } else if (parts.length === 2) {
+        // Одна точка - проверяем длину дробной части
+        if (parts[1].length === 3) {
+          // 3 цифры после точки - скорее всего разделитель тысяч (например "2.590")
+          cleaned = numericPart.replace('.', '');
+        } else if (parts[1].length <= 2) {
+          // 1-2 цифры после точки - десятичный разделитель
+          // Оставляем как есть
+          cleaned = numericPart;
+        } else {
+          // Больше 3 цифр - тоже разделитель тысяч
+          cleaned = numericPart.replace('.', '');
+        }
+      }
+    } else if (numericPart.includes(',')) {
+      // Только запятые
+      const parts = numericPart.split(',');
+      if (parts.length > 2) {
+        // Несколько запятых - разделители тысяч
+        cleaned = numericPart.replace(/,/g, '');
+      } else if (parts.length === 2) {
+        // Одна запятая
+        if (parts[1].length <= 2) {
+          // 1-2 цифры после запятой - десятичный разделитель
+          cleaned = numericPart.replace(',', '.');
+        } else {
+          // Больше 2 цифр - разделитель тысяч
+          cleaned = numericPart.replace(',', '');
+        }
+      }
+    } else {
+      cleaned = numericPart;
+    }
+
     const parsed = parseFloat(cleaned);
     return +(isNaN(parsed) ? 0 : parsed).toFixed(2);
+  };
+
+  /* =========================
+     Парсинг цены sila.by (специальный формат)
+     ========================= */
+  const parseSilaPromoPrice = (element) => {
+    if (!element) return null;
+
+    // Получаем весь текст внутри promoinv_price
+    const fullText = element.textContent.trim();
+
+    // Ищем целую часть (в теге <b>)
+    const rublesElement = element.querySelector('b');
+    if (!rublesElement) return null;
+
+    // Получаем текст целой части и убираем точку-разделитель тысяч
+    let rubles = rublesElement.textContent.trim();
+    rubles = rubles.replace(/\./g, ''); // Убираем точки-разделители тысяч
+
+    // Ищем копейки (второй тег <b> или текст после "руб.")
+    const allBoldElements = element.querySelectorAll('b');
+    let kopeks = '00';
+
+    if (allBoldElements.length >= 2) {
+      // Второй тег <b> содержит копейки
+      kopeks = allBoldElements[1].textContent.trim();
+    } else {
+      // Пробуем найти копейки в тексте
+      const textAfterRubles = fullText.replace(/руб\.?/i, '').trim();
+      const kopekMatch = textAfterRubles.match(/(\d+)/);
+      if (kopekMatch) {
+        kopeks = kopekMatch[1];
+      }
+    }
+
+    // Формируем полную цену
+    const fullPrice = parseFloat(rubles + '.' + kopeks.padStart(2, '0'));
+    return isNaN(fullPrice) ? null : +fullPrice.toFixed(2);
   };
 
   /* =========================
@@ -328,12 +426,30 @@
     const products = [];
     const seenItems = new Set();
 
-    $$('.btn_zak, .add_cmpr').forEach(btn => {
-      const data = extractItemData(btn.getAttribute('onclick') || '');
-      if (!data?.ecommerce?.items?.length) return;
-      const item = data.ecommerce.items[0];
+    // Получаем все карточки товаров по data-idabc
+    const productCards = $$('[data-idabc]');
 
+    productCards.forEach(card => {
       try {
+        const dataIdabc = card.getAttribute('data-idabc');
+        if (!dataIdabc) return;
+
+        // Ищем кнопку с data-uc-id совпадающим с data-idabc
+        const btnZak = $(`.btn_zak[data-uc-id="${dataIdabc}"]`, card);
+        const addCmpr = $(`.add_cmpr`, card);
+
+        // Пытаемся получить данные из любой доступной кнопки
+        let data = null;
+        if (btnZak) {
+          data = extractItemData(btnZak.getAttribute('onclick') || '');
+        }
+        if (!data && addCmpr) {
+          data = extractItemData(addCmpr.getAttribute('onclick') || '');
+        }
+
+        if (!data?.ecommerce?.items?.length) return;
+        const item = data.ecommerce.items[0];
+
         const brand = item.item_brand || '';
         const cat4 = item.item_category4 || '';
         const itemKey = `${brand}_${cat4}`;
@@ -344,17 +460,42 @@
         const price = parseFloat(item.price) || 0;
         const discount = parseFloat(item.discount) || 0;
 
-        products.push({
+        // Ищем акционную цену в блоке promoinv_price
+        let promoPrice = null;
+        const promoBlock = $('.promoinv', card);
+        if (promoBlock) {
+          const promoPriceEl = $('.promoinv_price', promoBlock);
+          if (promoPriceEl) {
+            promoPrice = parseSilaPromoPrice(promoPriceEl);
+          }
+        }
+
+        // Определяем цены
+        const priceWithoutDiscount = price + discount; // уже числа
+        const priceWithDiscount = price; // уже число
+
+        // Создаем объект товара
+        const product = {
           Категория: item.item_category5 || '',
           Бренд: brand,
           Артикул: article,
-          'Цена без скидки': formatPrice(price + discount),
-          'Цена со скидкой': formatPrice(price),
-        });
+          'Цена без скидки': +priceWithoutDiscount.toFixed(2)
+        };
+
+        // Если есть акционная цена, используем её как цену со скидкой
+        if (promoPrice && promoPrice > 0) {
+          product['Цена со скидкой'] = promoPrice;
+        } else {
+          product['Цена со скидкой'] = +priceWithDiscount.toFixed(2);
+        }
+
+        products.push(product);
+
       } catch (e) {
-        /* noop */
+        console.error('Error processing sila product card:', e);
       }
     });
+
     return products;
   };
 
@@ -624,7 +765,7 @@ const collectDataAtlant = () => {
       let article = '';
       if (articleEl) {
         const articleText = articleEl.textContent.trim();
-        article = articleText.replace(/^Арт\.:\s*/i, '');
+        article = article.replace(/^Арт\.:\s*/i, '');
       }
 
       // ✅ НОВЫЙ ПОРЯДОК КОЛОНОК: Артикул -> Наименование -> Цена
