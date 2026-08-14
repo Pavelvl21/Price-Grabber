@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Price Grabber[21vek.by, sila.by, ozon.by, onliner.by, dns-shop.by, emall.by, atlant-td.by]
 // @namespace    http://tampermonkey.net/
-// @version      2.1.4
+// @version      2.1.5
 // @description  Сбор названий и цен товаров со страниц каталога
 // @author       Pavelvl21
 // @match        https://www.21vek.by/*
