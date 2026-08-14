@@ -800,7 +800,7 @@
     if (document.querySelector('button[data-safe-script-btn="export"]')) return;
     const element = document.createElement('button');
     element.setAttribute('data-safe-script-btn', 'export');
-    const { btn } = styleMainButton(element, 'XLS', 'Скачать Excel');
+    const { btn } = styleMainButton(element, 'XLS', 'GET DAT SHEET!');
     btn.style.top = 'calc(50% - 80px)';
     btn.addEventListener('click', generateExcel);
     document.body.appendChild(btn);
