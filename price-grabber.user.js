@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Price Grabber[21vek.by, sila.by, ozon.by, onliner.by, dns-shop.by, emall.by, atlant-td.by]
 // @namespace    http://tampermonkey.net/
-// @version      2.1.3
-// @description  Выгрузка публичных данных товаров (названия и цены). ВНИМАНИЕ: Автор не несет ответственности за использование скрипта. Скрипт собирает только общедоступную информацию, видимую на страницах каталога. Любое использование в коммерческих целях или для сбора непубличных данных осуществляется на ваш страх и риск.
+// @version      2.1.4
+// @description  Сбор названий и цен товаров со страниц каталога
 // @author       Pavelvl21
 // @match        https://www.21vek.by/*
 // @match        https://sila.by/*
@@ -23,27 +23,7 @@
 (() => {
   'use strict';
 
-  /* =========================
-     ПРАВОВОЕ ПРЕДУПРЕЖДЕНИЕ
-     ========================= */
-  /**
-   * Данный скрипт предназначен ТОЛЬКО для сбора публичной информации,
-   * которая явно отображается на страницах каталога (названия товаров, цены).
-   *
-   * Автор не несет ответственности за:
-   * - использование скрипта в коммерческих целях
-   * - сбор непубличных данных (остатков, персональной информации и т.д.)
-   * - нарушение условий использования сайтов
-   * - любые последствия, связанные с применением скрипта
-   *
-   * Скрипт предоставляется "как есть" для личного некоммерческого использования.
-   * Перед использованием ознакомьтесь с законодательством вашей страны и
-   * условиями использования соответствующих сайтов.
-   */
-
-  /* =========================
-     Конфигурация / константы
-     ========================= */
+  // Настройки
   const CFG = {
     BTN_SIZE: 50,
     BTN_EXPANDED_WIDTH: 180,
@@ -64,18 +44,14 @@
     }
   };
 
-  /* =========================
-     Утилиты
-     ========================= */
+  // Вспомогательные функции
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   const randBetween = (min, max) => min + Math.random() * (max - min);
   const nowFilenameStamp = () => (new Date()).toISOString().replace(/[:.]/g, '-');
 
-  /* =========================
-     Стили и центрирование элементов
-     ========================= */
+  // Подключение шрифта
   const ensureFont = () => {
     if (!document.getElementById('poppins-font')) {
       const link = document.createElement('link');
@@ -86,6 +62,7 @@
     }
   };
 
+  // Стили для центрирования
   const styleCenter = el => Object.assign(el.style, {
     position: 'absolute',
     left: '50%',
@@ -94,6 +71,7 @@
     transition: 'all 0.28s ease'
   });
 
+  // Создание главной кнопки
   const styleMainButton = (btnElement, iconText, hoverText) => {
     Object.assign(btnElement.style, {
       position: 'fixed',
@@ -179,9 +157,7 @@
     };
   };
 
-  /* =========================
-     Спиннер
-     ========================= */
+  // Спиннер загрузки
   const createSmallSpinner = () => {
     const spinner = document.createElement('div');
     Object.assign(spinner.style, {
@@ -210,9 +186,7 @@
     return spinner;
   };
 
-  /* =========================
-     Экран-блок (overlay)
-     ========================= */
+  // Затемнение экрана
   const blockScreen = (show) => {
     const ID = 'overlay-block';
     let overlay = document.getElementById(ID);
@@ -228,7 +202,7 @@
         fontFamily: "'Courier New', monospace", userSelect: 'none',
       });
       const txt = document.createElement('div');
-      txt.textContent = 'Stackin\' da loot, no talkin\'...';
+      txt.textContent = 'Сбор данных...';
       txt.style.display = 'inline-flex';
       txt.style.alignItems = 'center';
       txt.style.gap = '14px';
@@ -248,65 +222,43 @@
     }
   };
 
-  /* =========================
-     Форматирование/парсинг цены
-     ========================= */
+  // Парсинг цены из текста
   const formatPrice = (raw) => {
     if (typeof raw === 'number') return +raw.toFixed(2);
 
     const str = (raw || '').toString().trim();
 
-    // Удаляем все пробелы (обычные, неразрывные, тонкие)
     let cleaned = str.replace(/[\u00A0\u202F\u2009\s]/g, '');
-
-    // Удаляем "руб.", "коп." и другие текстовые обозначения
     cleaned = cleaned.replace(/руб\.?|коп\.?|р\.?|BYN|бел\.?\s*руб\.?/gi, '').trim();
 
-    // Если строка пустая - возвращаем 0
     if (!cleaned) return 0;
 
-    // Удаляем все нецифровые символы кроме точки и запятой
     const numericPart = cleaned.replace(/[^\d.,]/g, '');
-
     if (!numericPart) return 0;
 
-    // Если есть и точка и запятая
     if (numericPart.includes('.') && numericPart.includes(',')) {
-      // Запятая обычно десятичный разделитель в европейском формате
       cleaned = numericPart.replace(/\./g, '').replace(',', '.');
     } else if (numericPart.includes('.')) {
-      // Только точки
       const parts = numericPart.split('.');
       if (parts.length > 2) {
-        // Несколько точек - разделители тысяч
         cleaned = numericPart.replace(/\./g, '');
       } else if (parts.length === 2) {
-        // Одна точка - проверяем длину дробной части
         if (parts[1].length === 3) {
-          // 3 цифры после точки - скорее всего разделитель тысяч (например "2.590")
           cleaned = numericPart.replace('.', '');
         } else if (parts[1].length <= 2) {
-          // 1-2 цифры после точки - десятичный разделитель
-          // Оставляем как есть
           cleaned = numericPart;
         } else {
-          // Больше 3 цифр - тоже разделитель тысяч
           cleaned = numericPart.replace('.', '');
         }
       }
     } else if (numericPart.includes(',')) {
-      // Только запятые
       const parts = numericPart.split(',');
       if (parts.length > 2) {
-        // Несколько запятых - разделители тысяч
         cleaned = numericPart.replace(/,/g, '');
       } else if (parts.length === 2) {
-        // Одна запятая
         if (parts[1].length <= 2) {
-          // 1-2 цифры после запятой - десятичный разделитель
           cleaned = numericPart.replace(',', '.');
         } else {
-          // Больше 2 цифр - разделитель тысяч
           cleaned = numericPart.replace(',', '');
         }
       }
@@ -318,32 +270,24 @@
     return +(isNaN(parsed) ? 0 : parsed).toFixed(2);
   };
 
-  /* =========================
-     Парсинг цены sila.by (специальный формат)
-     ========================= */
+  // Парсинг цены sila.by
   const parseSilaPromoPrice = (element) => {
     if (!element) return null;
 
-    // Получаем весь текст внутри promoinv_price
     const fullText = element.textContent.trim();
 
-    // Ищем целую часть (в теге <b>)
     const rublesElement = element.querySelector('b');
     if (!rublesElement) return null;
 
-    // Получаем текст целой части и убираем точку-разделитель тысяч
     let rubles = rublesElement.textContent.trim();
-    rubles = rubles.replace(/\./g, ''); // Убираем точки-разделители тысяч
+    rubles = rubles.replace(/\./g, '');
 
-    // Ищем копейки (второй тег <b> или текст после "руб.")
     const allBoldElements = element.querySelectorAll('b');
     let kopeks = '00';
 
     if (allBoldElements.length >= 2) {
-      // Второй тег <b> содержит копейки
       kopeks = allBoldElements[1].textContent.trim();
     } else {
-      // Пробуем найти копейки в тексте
       const textAfterRubles = fullText.replace(/руб\.?/i, '').trim();
       const kopekMatch = textAfterRubles.match(/(\d+)/);
       if (kopekMatch) {
@@ -351,14 +295,11 @@
       }
     }
 
-    // Формируем полную цену
     const fullPrice = parseFloat(rubles + '.' + kopeks.padStart(2, '0'));
     return isNaN(fullPrice) ? null : +fullPrice.toFixed(2);
   };
 
-  /* =========================
-     Извлечение данных item (sila)
-     ========================= */
+  // Извлечение данных из атрибута onclick
   const extractItemData = (onClickAttr) => {
     try {
       const match = (onClickAttr || '').match(/dataLayer\.push\((\{[\s\S]*?\})\)/);
@@ -369,9 +310,7 @@
     }
   };
 
-  /* =========================
-     Сбор данных: 21vek (каталог)
-     ========================= */
+  // Сбор данных: 21vek
   const collectData21vek = () => {
     const products = [];
     const seenNames = new Set();
@@ -419,14 +358,11 @@
     return products;
   };
 
-  /* =========================
-     Сбор данных: sila (каталог)
-     ========================= */
+  // Сбор данных: sila
   const collectDataSila = () => {
     const products = [];
     const seenItems = new Set();
 
-    // Получаем все карточки товаров по data-idabc
     const productCards = $$('[data-idabc]');
 
     productCards.forEach(card => {
@@ -434,11 +370,9 @@
         const dataIdabc = card.getAttribute('data-idabc');
         if (!dataIdabc) return;
 
-        // Ищем кнопку с data-uc-id совпадающим с data-idabc
         const btnZak = $(`.btn_zak[data-uc-id="${dataIdabc}"]`, card);
         const addCmpr = $(`.add_cmpr`, card);
 
-        // Пытаемся получить данные из любой доступной кнопки
         let data = null;
         if (btnZak) {
           data = extractItemData(btnZak.getAttribute('onclick') || '');
@@ -460,7 +394,6 @@
         const price = parseFloat(item.price) || 0;
         const discount = parseFloat(item.discount) || 0;
 
-        // Ищем акционную цену в блоке promoinv_price
         let promoPrice = null;
         const promoBlock = $('.promoinv', card);
         if (promoBlock) {
@@ -470,11 +403,9 @@
           }
         }
 
-        // Определяем цены
-        const priceWithoutDiscount = price + discount; // уже числа
-        const priceWithDiscount = price; // уже число
+        const priceWithoutDiscount = price + discount;
+        const priceWithDiscount = price;
 
-        // Создаем объект товара
         const product = {
           Категория: item.item_category5 || '',
           Бренд: brand,
@@ -482,7 +413,6 @@
           'Цена без скидки': +priceWithoutDiscount.toFixed(2)
         };
 
-        // Если есть акционная цена, используем её как цену со скидкой
         if (promoPrice && promoPrice > 0) {
           product['Цена со скидкой'] = promoPrice;
         } else {
@@ -499,9 +429,7 @@
     return products;
   };
 
-  /* =========================
-     Сбор данных: ozon.by
-     ========================= */
+  // Сбор данных: ozon
   const collectDataOzon = () => {
     const products = [];
     const seen = new Set();
@@ -544,16 +472,14 @@
           'Цена со скидкой': priceSale,
         });
       } catch (e) {
-        /* noop */
+        // пропускаем проблемные карточки
       }
     });
 
     return products;
   };
 
-  /* =========================
-     Сбор данных: onliner.by
-     ========================= */
+  // Сбор данных: onliner
   const collectDataOnliner = () => {
     const products = [];
     const seenNames = new Set();
@@ -606,9 +532,7 @@
     return products;
   };
 
-  /* =========================
-     Сбор данных: dns-shop.by
-     ========================= */
+  // Сбор данных: dns-shop
   const collectDataDnsShop = () => {
     const products = [];
     const seenNames = new Set();
@@ -666,9 +590,7 @@
     return products;
   };
 
-  /* =========================
-     Сбор данных: emall.by
-     ========================= */
+  // Сбор данных: emall
   const collectDataEmall = () => {
     const products = [];
     const seenNames = new Set();
@@ -719,82 +641,71 @@
     return products;
   };
 
+  // Сбор данных: atlant-td
+  const collectDataAtlant = () => {
+    const products = [];
+    const seenNames = new Set();
 
-  /* =========================
-   Сбор данных: atlant-td.by
-   ========================= */
-const collectDataAtlant = () => {
-  const products = [];
-  const seenNames = new Set();
+    const productCards = $$('.item_info');
 
-  const productCards = $$('.item_info');
-
-  if (!productCards.length) {
-    console.warn('No product cards found on atlant-td.by');
-    return products;
-  }
-
-  productCards.forEach(card => {
-    try {
-      const stockEl = card.querySelector('.item-stock .value.font_sxs');
-      if (!stockEl) return;
-
-      const stockText = stockEl.textContent.trim();
-
-      if (stockText.includes('Нет в наличии')) {
-        console.log('⏭️ Товар пропущен (нет в наличии)');
-        return;
-      }
-
-      const titleEl = card.querySelector('.item-title a.dark_link span');
-      if (!titleEl) return;
-
-      let name = titleEl.textContent.trim();
-      if (!name) return;
-
-      if (seenNames.has(name)) return;
-      seenNames.add(name);
-
-      const priceEl = card.querySelector('.price.font-bold.font_mxs .values_wrapper');
-      if (!priceEl) return;
-
-      const priceText = priceEl.textContent.trim();
-      const price = formatPrice(priceText);
-
-      const articleEl = card.querySelector('.article_block .muted.font_sxs');
-      let article = '';
-      if (articleEl) {
-        const articleText = articleEl.textContent.trim();
-        article = article.replace(/^Арт\.:\s*/i, '');
-      }
-
-      // ✅ НОВЫЙ ПОРЯДОК КОЛОНОК: Артикул -> Наименование -> Цена
-      const product = {};
-
-      // 1. Артикул (если есть)
-      if (article) {
-        product['Артикул'] = article;
-      }
-
-      // 2. Наименование
-      product['Наименование'] = name;
-
-      // 3. Цена
-      product['Цена'] = price;
-
-      products.push(product);
-
-    } catch (e) {
-      console.error('Error processing atlant-td.by product card:', e);
+    if (!productCards.length) {
+      console.warn('No product cards found on atlant-td.by');
+      return products;
     }
-  });
 
-  return products;
-};
+    productCards.forEach(card => {
+      try {
+        const stockEl = card.querySelector('.item-stock .value.font_sxs');
+        if (!stockEl) return;
 
-  /* =========================
-     Excel helpers
-     ========================= */
+        const stockText = stockEl.textContent.trim();
+
+        if (stockText.includes('Нет в наличии')) {
+          return;
+        }
+
+        const titleEl = card.querySelector('.item-title a.dark_link span');
+        if (!titleEl) return;
+
+        let name = titleEl.textContent.trim();
+        if (!name) return;
+
+        if (seenNames.has(name)) return;
+        seenNames.add(name);
+
+        const priceEl = card.querySelector('.price.font-bold.font_mxs .values_wrapper');
+        if (!priceEl) return;
+
+        const priceText = priceEl.textContent.trim();
+        const price = formatPrice(priceText);
+
+        const articleEl = card.querySelector('.article_block .muted.font_sxs');
+        let article = '';
+        if (articleEl) {
+          article = articleEl.textContent.trim();
+          article = article.replace(/^Арт\.:\s*/i, '');
+        }
+
+        const product = {};
+
+        if (article) {
+          product['Артикул'] = article;
+        }
+
+        product['Наименование'] = name;
+        product['Цена'] = price;
+
+        products.push(product);
+
+      } catch (e) {
+        console.error('Error processing atlant-td.by product card:', e);
+      }
+    });
+
+    return products;
+  };
+
+  // Форматирование числовых колонок в Excel
   const formatNumericColumns = (ws) => {
     if (!ws['!ref']) return;
     const range = XLSX.utils.decode_range(ws['!ref']);
@@ -818,6 +729,7 @@ const collectDataAtlant = () => {
     }
   };
 
+  // Установка ширины колонок
   const setColumnWidths = (ws, data) => {
     if (!data || !data.length) return;
     const keys = Object.keys(data[0] || {});
@@ -830,9 +742,7 @@ const collectDataAtlant = () => {
     });
   };
 
-  /* =========================
-     Генерация Excel
-     ========================= */
+  // Генерация Excel файла
   const generateExcel = () => {
     const isSila = location.hostname.includes('sila.by');
     const isOzon = location.hostname.includes('ozon');
@@ -885,22 +795,18 @@ const collectDataAtlant = () => {
     }
   };
 
-  /* =========================
-     Кнопка экспорт XLSX
-     ========================= */
+  // Создание кнопки экспорта
   const createExportButton = () => {
     if (document.querySelector('button[data-safe-script-btn="export"]')) return;
     const element = document.createElement('button');
     element.setAttribute('data-safe-script-btn', 'export');
-    const { btn } = styleMainButton(element, 'XLS', 'GET DAT SHEET!');
+    const { btn } = styleMainButton(element, 'XLS', 'Скачать Excel');
     btn.style.top = 'calc(50% - 80px)';
     btn.addEventListener('click', generateExcel);
     document.body.appendChild(btn);
   };
 
-  /* =========================
-     Инициализация
-     ========================= */
+  // Инициализация
   const init = () => {
     createExportButton();
   };
